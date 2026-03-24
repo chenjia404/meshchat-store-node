@@ -1,0 +1,17 @@
+.git
+.gitignore
+.cursor
+.vscode
+
+data
+tmp
+dist
+bin
+coverage
+
+*.log
+*.out
+*.test
+
+Dockerfile.*
+README.md
