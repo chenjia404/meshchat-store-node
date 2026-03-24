@@ -11,8 +11,9 @@ import (
 
 type Config struct {
 	Node struct {
-		ListenAddrs   []string `yaml:"listen_addrs"`
-		AnnounceAddrs []string `yaml:"announce_addrs"`
+		ListenAddrs     []string `yaml:"listen_addrs"`
+		AnnounceAddrs   []string `yaml:"announce_addrs"`
+		IdentityKeyPath string   `yaml:"identity_key_path"`
 	} `yaml:"node"`
 	Store struct {
 		DataDir                 string `yaml:"data_dir"`

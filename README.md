@@ -52,6 +52,19 @@ node:
     - /ip4/203.0.113.10/udp/4001/quic-v1
 ```
 
+## 节点 ID 持久化
+
+节点私钥现在会默认保存到 `store.data_dir` 下的 `node_identity.key`，因此同一个数据目录重启后，`peer ID` 不会变化。
+
+如果你需要自定义路径，也可以在配置中指定：
+
+```yaml
+node:
+  identity_key_path: ./data/node_identity.key
+```
+
+如果是在 Docker 中运行，请把数据目录挂载成持久卷，否则容器重建后私钥文件也会一起丢失，`peer ID` 仍然会变化。
+
 ## V1 ACK 约定
 
 V1 没有多设备概念，因此 `AckRequest.device_id` 固定等于账号 ID。

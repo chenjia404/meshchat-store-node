@@ -39,7 +39,17 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("open pebble: %w", err)
 	}
 
-	host, err := p2p.NewHost(cfg.Node.ListenAddrs, cfg.Node.AnnounceAddrs)
+	identityKeyPath := cfg.Node.IdentityKeyPath
+	if identityKeyPath == "" {
+		identityKeyPath = filepath.Join(cfg.Store.DataDir, "node_identity.key")
+	}
+	identityKey, err := p2p.LoadOrCreateIdentityKey(identityKeyPath)
+	if err != nil {
+		store.Close()
+		return nil, fmt.Errorf("load node identity: %w", err)
+	}
+
+	host, err := p2p.NewHost(cfg.Node.ListenAddrs, cfg.Node.AnnounceAddrs, identityKey)
 	if err != nil {
 		store.Close()
 		return nil, fmt.Errorf("create host: %w", err)

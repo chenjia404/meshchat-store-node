@@ -2,11 +2,12 @@ package p2p
 
 import (
 	"github.com/libp2p/go-libp2p"
+	crypto "github.com/libp2p/go-libp2p/core/crypto"
 	corehost "github.com/libp2p/go-libp2p/core/host"
 	"github.com/multiformats/go-multiaddr"
 )
 
-func NewHost(listenAddrs, announceAddrs []string) (corehost.Host, error) {
+func NewHost(listenAddrs, announceAddrs []string, identityKey crypto.PrivKey) (corehost.Host, error) {
 	listenMultiaddrs, err := parseMultiaddrs(listenAddrs)
 	if err != nil {
 		return nil, err
@@ -14,6 +15,9 @@ func NewHost(listenAddrs, announceAddrs []string) (corehost.Host, error) {
 
 	options := []libp2p.Option{
 		libp2p.ListenAddrs(listenMultiaddrs...),
+	}
+	if identityKey != nil {
+		options = append(options, libp2p.Identity(identityKey))
 	}
 	if len(announceAddrs) > 0 {
 		announceMultiaddrs, err := parseMultiaddrs(announceAddrs)
