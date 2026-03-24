@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -30,10 +31,7 @@ type Config struct {
 
 func Default() Config {
 	var cfg Config
-	cfg.Node.ListenAddrs = []string{
-		"/ip4/0.0.0.0/tcp/4001",
-		"/ip4/0.0.0.0/udp/4001/quic-v1",
-	}
+	cfg.Node.ListenAddrs = DefaultListenAddrs(4001)
 	cfg.Store.DataDir = "./data"
 	cfg.Store.DefaultTTLSec = 2592000
 	cfg.Store.MaxTTLSec = 2592000
@@ -60,4 +58,11 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func DefaultListenAddrs(port int) []string {
+	return []string{
+		fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port),
+		fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", port),
+	}
 }

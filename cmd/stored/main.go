@@ -14,7 +14,9 @@ import (
 
 func main() {
 	var configPath string
+	var port int
 	flag.StringVar(&configPath, "config", "", "yaml config path")
+	flag.IntVar(&port, "port", 0, "override default listen port for tcp and quic")
 	flag.Parse()
 
 	logger := appLog.New()
@@ -22,6 +24,9 @@ func main() {
 	if err != nil {
 		logger.Error("load config failed", "error", err)
 		os.Exit(1)
+	}
+	if port > 0 {
+		cfg.Node.ListenAddrs = config.DefaultListenAddrs(port)
 	}
 
 	instance, err := app.New(cfg, logger)
