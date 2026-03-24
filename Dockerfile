@@ -1,4 +1,4 @@
-FROM golang:1.26.1 AS builder
+FROM golang:1.26.1-alpine AS builder
 
 WORKDIR /src
 
@@ -9,11 +9,11 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/stored ./cmd/stored
 
-FROM debian:bookworm-slim
+FROM alpine:3.22
 
 WORKDIR /app
 
-RUN groupadd --system app && useradd --system --gid app --create-home --home-dir /app app
+RUN addgroup -S app && adduser -S -G app -h /app app
 
 COPY --from=builder /out/stored /usr/local/bin/stored
 
@@ -24,6 +24,5 @@ USER app
 EXPOSE 4001/tcp
 EXPOSE 4001/udp
 
-VOLUME ["/app/data"]
 
 ENTRYPOINT ["/usr/local/bin/stored"]
