@@ -20,6 +20,14 @@ go run ./cmd/stored -config ./config.yaml
 
 配置项结构与 `store.md` 第 19 节一致。
 
+## 覆盖默认监听端口
+
+可通过命令行参数覆盖默认监听端口，参数会同时作用于默认的 TCP 和 QUIC 地址：
+
+```bash
+go run ./cmd/stored -port 4101
+```
+
 ## V1 ACK 约定
 
 V1 没有多设备概念，因此 `AckRequest.device_id` 固定等于账号 ID。
