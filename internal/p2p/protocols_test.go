@@ -329,6 +329,28 @@ func TestOversizedFetchRequestResetsStream(t *testing.T) {
 	}
 }
 
+func TestInvalidJSONFetchReturnsStructuredError(t *testing.T) {
+	env := newProtocolTestEnv(t)
+
+	stream, err := env.sender.NewStream(context.Background(), env.server.ID(), FetchProtocol)
+	if err != nil {
+		t.Fatalf("NewStream(fetch) error = %v", err)
+	}
+	defer stream.Close()
+
+	if err := WriteFrame(stream, []byte(`{"version":1,"recipient_id":`), testServerFrameLimits().FetchRequest); err != nil {
+		t.Fatalf("WriteFrame() error = %v", err)
+	}
+
+	var resp protocol.FetchResponse
+	if err := ReadJSON(stream, &resp, 1<<20); err != nil {
+		t.Fatalf("ReadJSON() error = %v", err)
+	}
+	if resp.OK || resp.ErrorCode != protocol.CodeInvalidPayload {
+		t.Fatalf("fetch response = %+v", resp)
+	}
+}
+
 func signedStoreRequest(t *testing.T, priv crypto.PrivKey, senderID, recipientID, msgID string) *protocol.StoreRequest {
 	t.Helper()
 	ttl := int64(60)

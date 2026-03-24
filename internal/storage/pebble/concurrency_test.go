@@ -91,13 +91,15 @@ func TestConcurrentAckAndStore(t *testing.T) {
 		t.Fatalf("FetchMessages() setup error = %v", err)
 	} else if len(items) != 20 {
 		t.Fatalf("FetchMessages() setup len=%d, want 20", len(items))
+	} else if err := st.MarkDelivered(ctx, "recipient-ack", items); err != nil {
+		t.Fatalf("MarkDelivered() setup error = %v", err)
 	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		if _, err := st.AckMessages(ctx, "recipient-ack", 10); err != nil {
+		if _, _, err := st.AckMessages(ctx, "recipient-ack", 10); err != nil {
 			t.Errorf("AckMessages() error = %v", err)
 		}
 	}()

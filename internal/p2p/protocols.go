@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -79,9 +80,14 @@ func (s *Server) HandleStore(stream network.Stream) {
 	remotePeerID := stream.Conn().RemotePeer().String()
 	s.logger.Info("store request received", "remote_peer_id", remotePeerID)
 
-	var req protocol.StoreRequest
-	if err := s.readJSON(stream, &req, s.frameLimits.StoreRequest); err != nil {
+	frame, err := s.readFrame(stream, s.frameLimits.StoreRequest)
+	if err != nil {
 		s.resetStream(stream, "store request read failed", remotePeerID, err)
+		return
+	}
+	var req protocol.StoreRequest
+	if err := json.Unmarshal(frame, &req); err != nil {
+		s.writeInvalidStoreResponse(stream, remotePeerID, err)
 		return
 	}
 
@@ -100,9 +106,14 @@ func (s *Server) HandleFetch(stream network.Stream) {
 	remotePeerID := stream.Conn().RemotePeer().String()
 	s.logger.Info("fetch request received", "remote_peer_id", remotePeerID)
 
-	var req protocol.FetchRequest
-	if err := s.readJSON(stream, &req, s.frameLimits.FetchRequest); err != nil {
+	frame, err := s.readFrame(stream, s.frameLimits.FetchRequest)
+	if err != nil {
 		s.resetStream(stream, "fetch request read failed", remotePeerID, err)
+		return
+	}
+	var req protocol.FetchRequest
+	if err := json.Unmarshal(frame, &req); err != nil {
+		s.writeInvalidFetchResponse(stream, remotePeerID, err)
 		return
 	}
 
@@ -114,6 +125,11 @@ func (s *Server) HandleFetch(stream network.Stream) {
 		s.resetStream(stream, "fetch response write failed", remotePeerID, err)
 		return
 	}
+	if resp.OK {
+		if err := s.fetchSvc.MarkDelivered(ctx, req.RecipientID, resp.Items); err != nil {
+			s.logger.Error("mark delivered failed", "recipient_id", req.RecipientID, "remote_peer_id", remotePeerID, "error", err)
+		}
+	}
 	s.closeStream(stream)
 }
 
@@ -121,9 +137,14 @@ func (s *Server) HandleAck(stream network.Stream) {
 	remotePeerID := stream.Conn().RemotePeer().String()
 	s.logger.Info("ack request received", "remote_peer_id", remotePeerID)
 
-	var req protocol.AckRequest
-	if err := s.readJSON(stream, &req, s.frameLimits.AckRequest); err != nil {
+	frame, err := s.readFrame(stream, s.frameLimits.AckRequest)
+	if err != nil {
 		s.resetStream(stream, "ack request read failed", remotePeerID, err)
+		return
+	}
+	var req protocol.AckRequest
+	if err := json.Unmarshal(frame, &req); err != nil {
+		s.writeInvalidAckResponse(stream, remotePeerID, err)
 		return
 	}
 
@@ -138,11 +159,11 @@ func (s *Server) HandleAck(stream network.Stream) {
 	s.closeStream(stream)
 }
 
-func (s *Server) readJSON(stream network.Stream, payload any, maxSize uint32) error {
+func (s *Server) readFrame(stream network.Stream, maxSize uint32) ([]byte, error) {
 	if err := stream.SetReadDeadline(time.Now().Add(s.timeouts.Read)); err != nil {
-		return err
+		return nil, err
 	}
-	return ReadJSON(stream, payload, maxSize)
+	return ReadFrame(stream, maxSize)
 }
 
 func (s *Server) writeJSON(stream network.Stream, payload any, maxSize uint32) error {
@@ -155,6 +176,46 @@ func (s *Server) writeJSON(stream network.Stream, payload any, maxSize uint32) e
 func (s *Server) resetStream(stream network.Stream, message string, remotePeerID string, err error) {
 	s.logger.Warn(message, "remote_peer_id", remotePeerID, "error", err)
 	_ = stream.Reset()
+}
+
+func (s *Server) writeInvalidStoreResponse(stream network.Stream, remotePeerID string, err error) {
+	resp := &protocol.StoreResponse{
+		OK:           false,
+		ErrorCode:    protocol.CodeInvalidPayload,
+		ErrorMessage: err.Error(),
+	}
+	if writeErr := s.writeJSON(stream, resp, s.frameLimits.StoreResponse); writeErr != nil {
+		s.resetStream(stream, "store invalid payload response write failed", remotePeerID, writeErr)
+		return
+	}
+	s.closeStream(stream)
+}
+
+func (s *Server) writeInvalidFetchResponse(stream network.Stream, remotePeerID string, err error) {
+	resp := &protocol.FetchResponse{
+		OK:           false,
+		Items:        []*protocol.StoredMessage{},
+		ErrorCode:    protocol.CodeInvalidPayload,
+		ErrorMessage: err.Error(),
+	}
+	if writeErr := s.writeJSON(stream, resp, s.frameLimits.FetchResponse); writeErr != nil {
+		s.resetStream(stream, "fetch invalid payload response write failed", remotePeerID, writeErr)
+		return
+	}
+	s.closeStream(stream)
+}
+
+func (s *Server) writeInvalidAckResponse(stream network.Stream, remotePeerID string, err error) {
+	resp := &protocol.AckResponse{
+		OK:           false,
+		ErrorCode:    protocol.CodeInvalidPayload,
+		ErrorMessage: err.Error(),
+	}
+	if writeErr := s.writeJSON(stream, resp, s.frameLimits.AckResponse); writeErr != nil {
+		s.resetStream(stream, "ack invalid payload response write failed", remotePeerID, writeErr)
+		return
+	}
+	s.closeStream(stream)
 }
 
 func (s *Server) closeStream(stream network.Stream) {

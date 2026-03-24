@@ -41,15 +41,15 @@ func (s *AckService) Handle(ctx context.Context, remotePeerID string, req *proto
 		return s.errorResponse(protocol.NewAppError(protocol.CodeUnauthorized, "remote peer is not recipient"))
 	}
 
-	deletedUntil, err := s.storage.AckMessages(ctx, req.RecipientID, req.AckSeq)
+	deletedUntil, deletedCount, err := s.storage.AckMessages(ctx, req.RecipientID, req.AckSeq)
 	if err != nil {
 		s.logger.Warn("ack rejected", "recipient_id", req.RecipientID, "ack_seq", req.AckSeq, "remote_peer_id", remotePeerID, "error_code", protocol.ErrorCode(err))
 		return s.errorResponse(err)
 	}
-	if deletedUntil > 0 {
-		s.metrics.AckDeletedTotal.Add(deletedUntil)
+	if deletedCount > 0 {
+		s.metrics.AckDeletedTotal.Add(uint64(deletedCount))
 	}
-	s.logger.Info("ack completed", "recipient_id", req.RecipientID, "ack_seq", req.AckSeq, "deleted_until_seq", deletedUntil, "remote_peer_id", remotePeerID)
+	s.logger.Info("ack completed", "recipient_id", req.RecipientID, "ack_seq", req.AckSeq, "deleted_until_seq", deletedUntil, "deleted_count", deletedCount, "remote_peer_id", remotePeerID)
 	return &protocol.AckResponse{
 		OK:              true,
 		DeletedUntilSeq: deletedUntil,

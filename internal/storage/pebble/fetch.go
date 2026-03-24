@@ -45,16 +45,17 @@ func (s *Store) FetchMessages(ctx context.Context, recipientID string, afterSeq 
 	if err := iter.Error(); err != nil {
 		return nil, false, err
 	}
-	if err := s.markDelivered(recipientID, items, now); err != nil {
-		return nil, false, err
-	}
 	return items, hasMore, nil
 }
 
-func (s *Store) markDelivered(recipientID string, items []*protocol.StoredMessage, now int64) error {
+func (s *Store) MarkDelivered(ctx context.Context, recipientID string, items []*protocol.StoredMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(items) == 0 {
 		return nil
 	}
+	now := s.nowFunc().UTC().Unix()
 	unlock := s.recipientShards.Lock(recipientID)
 	defer unlock()
 

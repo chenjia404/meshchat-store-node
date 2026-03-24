@@ -85,8 +85,11 @@ func TestStoreFetchAckAndDuplicate(t *testing.T) {
 	if items[0].StoreSeq != 1 || items[1].StoreSeq != 2 {
 		t.Fatalf("FetchMessages() seqs = %d,%d", items[0].StoreSeq, items[1].StoreSeq)
 	}
+	if err := st.MarkDelivered(ctx, "recipient-1", items); err != nil {
+		t.Fatalf("MarkDelivered() error = %v", err)
+	}
 
-	deletedUntil, err := st.AckMessages(ctx, "recipient-1", 1)
+	deletedUntil, _, err := st.AckMessages(ctx, "recipient-1", 1)
 	if err != nil {
 		t.Fatalf("AckMessages() error = %v", err)
 	}
@@ -153,8 +156,11 @@ func TestFetchFiltersExpiredBeforeGC(t *testing.T) {
 	if len(items) != 1 || items[0].StoreSeq != 2 || items[0].Message.MsgID != "msg-live" {
 		t.Fatalf("FetchMessages() items = %+v", items)
 	}
+	if err := st.MarkDelivered(ctx, "recipient-exp", items); err != nil {
+		t.Fatalf("MarkDelivered() error = %v", err)
+	}
 
-	deletedUntil, err := st.AckMessages(ctx, "recipient-exp", 2)
+	deletedUntil, _, err := st.AckMessages(ctx, "recipient-exp", 2)
 	if err != nil {
 		t.Fatalf("AckMessages() error = %v", err)
 	}
@@ -221,8 +227,11 @@ func TestAckMessagesRejectsUndeliveredFrontier(t *testing.T) {
 	if len(items) != 2 || items[1].StoreSeq != 2 {
 		t.Fatalf("FetchMessages() items = %+v", items)
 	}
+	if err := st.MarkDelivered(ctx, "recipient-4", items); err != nil {
+		t.Fatalf("MarkDelivered() error = %v", err)
+	}
 
-	deletedUntil, err := st.AckMessages(ctx, "recipient-4", 3)
+	deletedUntil, _, err := st.AckMessages(ctx, "recipient-4", 3)
 	if err == nil {
 		t.Fatalf("AckMessages() error = nil, want invalid payload")
 	}
@@ -233,11 +242,52 @@ func TestAckMessagesRejectsUndeliveredFrontier(t *testing.T) {
 		t.Fatalf("AckMessages() deletedUntil = %d, want 0", deletedUntil)
 	}
 
-	deletedUntil, err = st.AckMessages(ctx, "recipient-4", 2)
+	deletedUntil, _, err = st.AckMessages(ctx, "recipient-4", 2)
 	if err != nil {
 		t.Fatalf("AckMessages() error = %v", err)
 	}
 	if deletedUntil != 2 {
 		t.Fatalf("AckMessages() deletedUntil = %d, want 2", deletedUntil)
+	}
+}
+
+func TestFetchDoesNotAdvanceDeliveredBeforeCommit(t *testing.T) {
+	st := newTestStore(t)
+	st.SetNowFunc(func() time.Time { return time.Unix(1710000000, 0).UTC() })
+
+	ctx := context.Background()
+	if _, _, _, err := st.StoreMessage(ctx, testStoredMessage("recipient-commit", "msg-1", 60)); err != nil {
+		t.Fatalf("StoreMessage() error = %v", err)
+	}
+
+	items, _, err := st.FetchMessages(ctx, "recipient-commit", 0, 10)
+	if err != nil {
+		t.Fatalf("FetchMessages() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("FetchMessages() len=%d, want 1", len(items))
+	}
+
+	deletedUntil, _, err := st.AckMessages(ctx, "recipient-commit", 1)
+	if err == nil {
+		t.Fatalf("AckMessages() error = nil, want invalid payload")
+	}
+	if protocol.ErrorCode(err) != protocol.CodeInvalidPayload {
+		t.Fatalf("AckMessages() error code = %s, want %s", protocol.ErrorCode(err), protocol.CodeInvalidPayload)
+	}
+	if deletedUntil != 0 {
+		t.Fatalf("AckMessages() deletedUntil = %d, want 0", deletedUntil)
+	}
+
+	if err := st.MarkDelivered(ctx, "recipient-commit", items); err != nil {
+		t.Fatalf("MarkDelivered() error = %v", err)
+	}
+
+	deletedUntil, _, err = st.AckMessages(ctx, "recipient-commit", 1)
+	if err != nil {
+		t.Fatalf("AckMessages() error after commit = %v", err)
+	}
+	if deletedUntil != 1 {
+		t.Fatalf("AckMessages() deletedUntil after commit = %d, want 1", deletedUntil)
 	}
 }

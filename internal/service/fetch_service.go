@@ -48,6 +48,10 @@ func (s *FetchService) Handle(ctx context.Context, remotePeerID string, req *pro
 	}
 }
 
+func (s *FetchService) MarkDelivered(ctx context.Context, recipientID string, items []*protocol.StoredMessage) error {
+	return s.storage.MarkDelivered(ctx, recipientID, items)
+}
+
 func (s *FetchService) errorResponse(err error) *protocol.FetchResponse {
 	return &protocol.FetchResponse{
 		OK:           false,
