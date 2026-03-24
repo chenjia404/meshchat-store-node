@@ -28,6 +28,30 @@ go run ./cmd/stored -config ./config.yaml
 go run ./cmd/stored -port 4101
 ```
 
+## 覆盖 libp2p 广播 IP
+
+如果节点监听在 `0.0.0.0`，但你希望 libp2p 对外广播一个固定公网或局域网 IP，可使用：
+
+```bash
+go run ./cmd/stored -announce-ip 192.168.1.10
+```
+
+该参数会基于当前 `listen_addrs` 生成对应的广播地址，例如把 `0.0.0.0` 或 `127.0.0.1` 替换成你指定的 IP。
+
+如果没有传 `-announce-ip`，且配置里也没有 `announce_addrs`，程序会在启动时自动请求公网 IP 查询接口，并把结果作为 libp2p 的广播地址。监听地址仍然保持 `0.0.0.0`，适合 Docker 内运行、宿主机对外暴露端口的场景。
+
+也可以在配置文件中直接设置：
+
+```yaml
+node:
+  listen_addrs:
+    - /ip4/0.0.0.0/tcp/4001
+    - /ip4/0.0.0.0/udp/4001/quic-v1
+  announce_addrs:
+    - /ip4/203.0.113.10/tcp/4001
+    - /ip4/203.0.113.10/udp/4001/quic-v1
+```
+
 ## V1 ACK 约定
 
 V1 没有多设备概念，因此 `AckRequest.device_id` 固定等于账号 ID。

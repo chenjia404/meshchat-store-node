@@ -39,7 +39,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("open pebble: %w", err)
 	}
 
-	host, err := p2p.NewHost(cfg.Node.ListenAddrs)
+	host, err := p2p.NewHost(cfg.Node.ListenAddrs, cfg.Node.AnnounceAddrs)
 	if err != nil {
 		store.Close()
 		return nil, fmt.Errorf("create host: %w", err)

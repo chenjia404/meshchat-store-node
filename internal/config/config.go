@@ -2,14 +2,17 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
 	Node struct {
-		ListenAddrs []string `yaml:"listen_addrs"`
+		ListenAddrs   []string `yaml:"listen_addrs"`
+		AnnounceAddrs []string `yaml:"announce_addrs"`
 	} `yaml:"node"`
 	Store struct {
 		DataDir                 string `yaml:"data_dir"`
@@ -65,4 +68,33 @@ func DefaultListenAddrs(port int) []string {
 		fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port),
 		fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", port),
 	}
+}
+
+func BuildAnnounceAddrs(listenAddrs []string, announceIP string) ([]string, error) {
+	parsedIP := net.ParseIP(announceIP)
+	if parsedIP == nil {
+		return nil, fmt.Errorf("invalid announce ip: %q", announceIP)
+	}
+
+	protocol := "ip6"
+	normalizedIP := parsedIP.String()
+	if ipv4 := parsedIP.To4(); ipv4 != nil {
+		protocol = "ip4"
+		normalizedIP = ipv4.String()
+	}
+
+	addrs := make([]string, 0, len(listenAddrs))
+	for _, addr := range listenAddrs {
+		parts := strings.Split(addr, "/")
+		if len(parts) < 4 {
+			return nil, fmt.Errorf("unsupported listen addr: %q", addr)
+		}
+		if parts[1] != "ip4" && parts[1] != "ip6" {
+			return nil, fmt.Errorf("unsupported listen addr protocol: %q", addr)
+		}
+		parts[1] = protocol
+		parts[2] = normalizedIP
+		addrs = append(addrs, strings.Join(parts, "/"))
+	}
+	return addrs, nil
 }

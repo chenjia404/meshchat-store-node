@@ -6,17 +6,21 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"store-node/internal/app"
 	"store-node/internal/config"
 	appLog "store-node/internal/log"
+	"store-node/internal/netutil"
 )
 
 func main() {
 	var configPath string
 	var port int
+	var announceIP string
 	flag.StringVar(&configPath, "config", "", "yaml config path")
 	flag.IntVar(&port, "port", 0, "override default listen port for tcp and quic")
+	flag.StringVar(&announceIP, "announce-ip", "", "override the IP advertised by libp2p")
 	flag.Parse()
 
 	logger := appLog.New()
@@ -27,6 +31,27 @@ func main() {
 	}
 	if port > 0 {
 		cfg.Node.ListenAddrs = config.DefaultListenAddrs(port)
+	}
+	if announceIP != "" {
+		cfg.Node.AnnounceAddrs, err = config.BuildAnnounceAddrs(cfg.Node.ListenAddrs, announceIP)
+		if err != nil {
+			logger.Error("build announce addrs failed", "error", err)
+			os.Exit(1)
+		}
+	} else if len(cfg.Node.AnnounceAddrs) == 0 {
+		resolveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		detectedIP, detectErr := netutil.DetectPublicIP(resolveCtx, nil, nil)
+		cancel()
+		if detectErr != nil {
+			logger.Warn("detect public ip failed, continue without announce addrs", "error", detectErr)
+		} else {
+			cfg.Node.AnnounceAddrs, err = config.BuildAnnounceAddrs(cfg.Node.ListenAddrs, detectedIP)
+			if err != nil {
+				logger.Error("build detected announce addrs failed", "public_ip", detectedIP, "error", err)
+				os.Exit(1)
+			}
+			logger.Info("detected public ip for announce addrs", "public_ip", detectedIP)
+		}
 	}
 
 	instance, err := app.New(cfg, logger)
