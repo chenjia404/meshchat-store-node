@@ -1,12 +1,14 @@
 package p2p
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,13 +27,15 @@ import (
 
 func testServerFrameLimits() FrameLimits {
 	return FrameLimits{
-		StoreRequest:  1 << 20,
-		StoreResponse: 1 << 16,
-		FetchRequest:  1 << 14,
-		FetchResponse: 1 << 20,
-		AckRequest:    1 << 14,
-		AckResponse:   1 << 16,
+		RPCRequest:  1 << 20,
+		RPCResponse: 1 << 20,
 	}
+}
+
+var testRPCSeq atomic.Uint64
+
+func nextRPCRequestID() string {
+	return fmt.Sprintf("req-%d", testRPCSeq.Add(1))
 }
 
 func testServerTimeouts() Timeouts {
@@ -309,45 +313,117 @@ func TestAckRejectsBeyondDeliveredFrontier(t *testing.T) {
 	}
 }
 
-func TestOversizedFetchRequestResetsStream(t *testing.T) {
+func TestOversizedRPCRequestResetsStream(t *testing.T) {
 	env := newProtocolTestEnv(t)
 
-	stream, err := env.sender.NewStream(context.Background(), env.server.ID(), FetchProtocol)
+	stream, err := env.sender.NewStream(context.Background(), env.server.ID(), RPCProtocol)
 	if err != nil {
-		t.Fatalf("NewStream(fetch) error = %v", err)
+		t.Fatalf("NewStream(rpc) error = %v", err)
 	}
 	defer stream.Close()
 
-	if err := WriteFrame(stream, bytes.Repeat([]byte("a"), int(testServerFrameLimits().FetchRequest)+1), 1<<20); err != nil {
+	// 只发送 4 字节大端长度头，声明长度 = max+1；服务端 ReadFrame 读完头即可判定超长并 reset，
+	// 无需发送整帧负载，避免写端因对端提前 reset 而失败、导致测试在「未验证服务端路径」时误通过。
+	max := testServerFrameLimits().RPCRequest
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(max)+1)
+	if _, err := stream.Write(header[:]); err != nil {
+		t.Fatalf("write length header: %v", err)
+	}
+
+	_ = stream.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var rpcResp protocol.RPCResponse
+	if err := ReadJSON(stream, &rpcResp, 1<<20); err == nil {
+		t.Fatalf("ReadJSON() error = nil, want reset or EOF after server rejects oversized frame")
+	}
+}
+
+func TestRPCUnknownMethodReturnsStructuredBody(t *testing.T) {
+	env := newProtocolTestEnv(t)
+	rpcReq := protocol.RPCRequest{
+		RequestID: nextRPCRequestID(),
+		Method:    "not.a.real.method",
+		Body:      json.RawMessage(`{}`),
+	}
+	stream, err := env.sender.NewStream(context.Background(), env.server.ID(), RPCProtocol)
+	if err != nil {
+		t.Fatalf("NewStream(rpc) error = %v", err)
+	}
+	defer stream.Close()
+	if err := WriteJSON(stream, &rpcReq, testServerFrameLimits().RPCRequest); err != nil {
+		t.Fatalf("WriteJSON() error = %v", err)
+	}
+	var rpcResp protocol.RPCResponse
+	if err := ReadJSON(stream, &rpcResp, testServerFrameLimits().RPCResponse); err != nil {
+		t.Fatalf("ReadJSON() error = %v", err)
+	}
+	if rpcResp.OK || len(rpcResp.Body) == 0 {
+		t.Fatalf("rpc response = %+v", rpcResp)
+	}
+	var eb protocol.RPCErrorBody
+	if err := json.Unmarshal(rpcResp.Body, &eb); err != nil {
+		t.Fatalf("unmarshal rpc error body: %v", err)
+	}
+	if eb.ErrorCode != protocol.CodeRPCUnknownMethod || eb.Method != "not.a.real.method" {
+		t.Fatalf("RPCErrorBody = %+v", eb)
+	}
+}
+
+func TestRPCInvalidEnvelopeJSONReturnsStructuredBody(t *testing.T) {
+	env := newProtocolTestEnv(t)
+	stream, err := env.sender.NewStream(context.Background(), env.server.ID(), RPCProtocol)
+	if err != nil {
+		t.Fatalf("NewStream(rpc) error = %v", err)
+	}
+	defer stream.Close()
+	raw := []byte(`not valid json`)
+	if err := WriteFrame(stream, raw, uint32(len(raw))); err != nil {
 		t.Fatalf("WriteFrame() error = %v", err)
 	}
-	_ = stream.SetReadDeadline(time.Now().Add(2 * time.Second))
-
-	var resp protocol.FetchResponse
-	if err := ReadJSON(stream, &resp, 1<<20); err == nil {
-		t.Fatalf("ReadJSON() error = nil, want reset")
+	var rpcResp protocol.RPCResponse
+	if err := ReadJSON(stream, &rpcResp, testServerFrameLimits().RPCResponse); err != nil {
+		t.Fatalf("ReadJSON() error = %v", err)
+	}
+	if rpcResp.OK || len(rpcResp.Body) == 0 {
+		t.Fatalf("rpc response = %+v", rpcResp)
+	}
+	var eb protocol.RPCErrorBody
+	if err := json.Unmarshal(rpcResp.Body, &eb); err != nil {
+		t.Fatalf("unmarshal rpc error body: %v", err)
+	}
+	if eb.ErrorCode != protocol.CodeRPCInvalidRequest {
+		t.Fatalf("error_code = %q, want %q", eb.ErrorCode, protocol.CodeRPCInvalidRequest)
 	}
 }
 
 func TestInvalidJSONFetchReturnsStructuredError(t *testing.T) {
 	env := newProtocolTestEnv(t)
 
-	stream, err := env.sender.NewStream(context.Background(), env.server.ID(), FetchProtocol)
+	stream, err := env.sender.NewStream(context.Background(), env.server.ID(), RPCProtocol)
 	if err != nil {
-		t.Fatalf("NewStream(fetch) error = %v", err)
+		t.Fatalf("NewStream(rpc) error = %v", err)
 	}
 	defer stream.Close()
 
-	if err := WriteFrame(stream, []byte(`{"version":1,"recipient_id":`), testServerFrameLimits().FetchRequest); err != nil {
-		t.Fatalf("WriteFrame() error = %v", err)
+	rpcReq := protocol.RPCRequest{
+		RequestID: nextRPCRequestID(),
+		Method:    protocol.MethodOfflineFetch,
+		Body:      json.RawMessage(`true`),
+	}
+	if err := WriteJSON(stream, &rpcReq, testServerFrameLimits().RPCRequest); err != nil {
+		t.Fatalf("WriteJSON() error = %v", err)
 	}
 
-	var resp protocol.FetchResponse
-	if err := ReadJSON(stream, &resp, 1<<20); err != nil {
+	var rpcResp protocol.RPCResponse
+	if err := ReadJSON(stream, &rpcResp, 1<<20); err != nil {
 		t.Fatalf("ReadJSON() error = %v", err)
 	}
-	if resp.OK || resp.ErrorCode != protocol.CodeInvalidPayload {
-		t.Fatalf("fetch response = %+v", resp)
+	var inner protocol.FetchResponse
+	if err := json.Unmarshal(rpcResp.Body, &inner); err != nil {
+		t.Fatalf("unmarshal rpc body: %v", err)
+	}
+	if inner.OK || inner.ErrorCode != protocol.CodeInvalidPayload {
+		t.Fatalf("fetch response = %+v", inner)
 	}
 }
 
@@ -413,51 +489,64 @@ func signedAckRequest(t *testing.T, priv crypto.PrivKey, recipientID string, ack
 
 func sendStoreRequest(t *testing.T, client corehost.Host, serverID peer.ID, req *protocol.StoreRequest) *protocol.StoreResponse {
 	t.Helper()
-	stream, err := client.NewStream(context.Background(), serverID, StoreProtocol)
+	body, err := json.Marshal(req)
 	if err != nil {
-		t.Fatalf("NewStream(store) error = %v", err)
+		t.Fatalf("Marshal(store body) error = %v", err)
 	}
-	defer stream.Close()
-	if err := WriteJSON(stream, req, 1<<20); err != nil {
-		t.Fatalf("WriteJSON(store) error = %v", err)
+	rpcResp := sendRPC(t, client, serverID, protocol.MethodOfflineStore, body)
+	var inner protocol.StoreResponse
+	if err := json.Unmarshal(rpcResp.Body, &inner); err != nil {
+		t.Fatalf("unmarshal store rpc body: %v", err)
 	}
-	var resp protocol.StoreResponse
-	if err := ReadJSON(stream, &resp, 1<<20); err != nil {
-		t.Fatalf("ReadJSON(store) error = %v", err)
-	}
-	return &resp
+	return &inner
 }
 
 func sendFetchRequest(t *testing.T, client corehost.Host, serverID peer.ID, req *protocol.FetchRequest) *protocol.FetchResponse {
 	t.Helper()
-	stream, err := client.NewStream(context.Background(), serverID, FetchProtocol)
+	body, err := json.Marshal(req)
 	if err != nil {
-		t.Fatalf("NewStream(fetch) error = %v", err)
+		t.Fatalf("Marshal(fetch body) error = %v", err)
 	}
-	defer stream.Close()
-	if err := WriteJSON(stream, req, 1<<20); err != nil {
-		t.Fatalf("WriteJSON(fetch) error = %v", err)
+	rpcResp := sendRPC(t, client, serverID, protocol.MethodOfflineFetch, body)
+	var inner protocol.FetchResponse
+	if err := json.Unmarshal(rpcResp.Body, &inner); err != nil {
+		t.Fatalf("unmarshal fetch rpc body: %v", err)
 	}
-	var resp protocol.FetchResponse
-	if err := ReadJSON(stream, &resp, 1<<20); err != nil {
-		t.Fatalf("ReadJSON(fetch) error = %v", err)
-	}
-	return &resp
+	return &inner
 }
 
 func sendAckRequest(t *testing.T, client corehost.Host, serverID peer.ID, req *protocol.AckRequest) *protocol.AckResponse {
 	t.Helper()
-	stream, err := client.NewStream(context.Background(), serverID, AckProtocol)
+	body, err := json.Marshal(req)
 	if err != nil {
-		t.Fatalf("NewStream(ack) error = %v", err)
+		t.Fatalf("Marshal(ack body) error = %v", err)
+	}
+	rpcResp := sendRPC(t, client, serverID, protocol.MethodOfflineAck, body)
+	var inner protocol.AckResponse
+	if err := json.Unmarshal(rpcResp.Body, &inner); err != nil {
+		t.Fatalf("unmarshal ack rpc body: %v", err)
+	}
+	return &inner
+}
+
+func sendRPC(t *testing.T, client corehost.Host, serverID peer.ID, method string, body json.RawMessage) protocol.RPCResponse {
+	t.Helper()
+	stream, err := client.NewStream(context.Background(), serverID, RPCProtocol)
+	if err != nil {
+		t.Fatalf("NewStream(rpc) error = %v", err)
 	}
 	defer stream.Close()
-	if err := WriteJSON(stream, req, 1<<20); err != nil {
-		t.Fatalf("WriteJSON(ack) error = %v", err)
+	rpcReq := protocol.RPCRequest{
+		RequestID: nextRPCRequestID(),
+		Method:    method,
+		Body:      body,
 	}
-	var resp protocol.AckResponse
-	if err := ReadJSON(stream, &resp, 1<<20); err != nil {
-		t.Fatalf("ReadJSON(ack) error = %v", err)
+	if err := WriteJSON(stream, &rpcReq, testServerFrameLimits().RPCRequest); err != nil {
+		t.Fatalf("WriteJSON(rpc) error = %v", err)
 	}
-	return &resp
+	var rpcResp protocol.RPCResponse
+	if err := ReadJSON(stream, &rpcResp, testServerFrameLimits().RPCResponse); err != nil {
+		t.Fatalf("ReadJSON(rpc) error = %v", err)
+	}
+	return rpcResp
 }

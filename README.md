@@ -2,6 +2,35 @@
 
 基于 Go 1.26.1、libp2p stream、Pebble 和 length-prefixed JSON 的离线私聊消息 store 节点。
 
+## libp2p 流协议（统一 RPC）
+
+节点只注册一个协议 ID：`/meshchat/offline-store/rpc/1.0.0`。载荷为 **4 字节大端长度 + JSON**（与原先一致）。
+
+请求：
+
+```json
+{
+  "request_id": "uuid",
+  "method": "offline.store",
+  "body": {}
+}
+```
+
+响应：
+
+```json
+{
+  "request_id": "uuid",
+  "ok": true,
+  "error": "",
+  "body": {}
+}
+```
+
+- `method` 取值：`offline.store`、`offline.fetch`、`offline.ack`
+- `body`：分别为原先的 `StoreRequest`、`FetchRequest`、`AckRequest` JSON（字段不变）
+- 响应里的 `body`：成功时为原先的 `StoreResponse` / `FetchResponse` / `AckResponse`；业务失败时同样为上述结构（含 `error_code` / `error_message`）。**RPC 层错误**（非法外层 JSON、缺少 `request_id`、未知 `method` 等）时，`body` 固定为 `{"error_code":"...","error_message":"..."}`，未知方法时额外带 `"method":"请求里的 method"`。这样客户端始终可以按 JSON 解出 `error_code`，无需对 `body == null` 单独分支。
+
 ## 启动
 
 1. 安装 Go 1.26.1。

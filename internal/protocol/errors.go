@@ -4,6 +4,9 @@ import "fmt"
 
 const (
 	CodeOK                     = "OK"
+	CodeRPCInvalidRequest      = "RPC_INVALID_REQUEST"
+	CodeRPCMissingRequestID    = "RPC_MISSING_REQUEST_ID"
+	CodeRPCUnknownMethod       = "RPC_UNKNOWN_METHOD"
 	CodeInvalidPayload         = "INVALID_PAYLOAD"
 	CodeInvalidSignature       = "INVALID_SIGNATURE"
 	CodeInvalidAckSignature    = "INVALID_ACK_SIGNATURE"

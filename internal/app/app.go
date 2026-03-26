@@ -118,19 +118,21 @@ func (a *App) Host() corehost.Host {
 func frameLimits(cfg config.Config) p2p.FrameLimits {
 	const smallFrame = 16 * 1024
 	const messageOverhead = 64 * 1024
+	const rpcEnvelopeOverhead = 4096
 
 	storeRequest := cfg.Store.MaxMessageSize + messageOverhead
 	fetchResponse := cfg.Store.MaxMessageSize*cfg.Store.FetchLimitMax + messageOverhead
 	if fetchResponse < smallFrame {
 		fetchResponse = smallFrame
 	}
+	rpcReq := storeRequest + rpcEnvelopeOverhead
+	if rpcReq < smallFrame+rpcEnvelopeOverhead {
+		rpcReq = smallFrame + rpcEnvelopeOverhead
+	}
+	rpcResp := fetchResponse + rpcEnvelopeOverhead
 	return p2p.FrameLimits{
-		StoreRequest:  uint32(storeRequest),
-		StoreResponse: smallFrame,
-		FetchRequest:  smallFrame,
-		FetchResponse: uint32(fetchResponse),
-		AckRequest:    smallFrame,
-		AckResponse:   smallFrame,
+		RPCRequest:  uint32(rpcReq),
+		RPCResponse: uint32(rpcResp),
 	}
 }
 
