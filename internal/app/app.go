@@ -15,6 +15,7 @@ import (
 	gcworker "store-node/internal/gc"
 	"store-node/internal/metrics"
 	"store-node/internal/p2p"
+	"store-node/internal/publicchannel"
 	"store-node/internal/ratelimit"
 	"store-node/internal/service"
 	pebblestore "store-node/internal/storage/pebble"
@@ -25,8 +26,9 @@ type App struct {
 	logger  *slog.Logger
 	metrics *metrics.Metrics
 	host    corehost.Host
-	store   *pebblestore.Store
-	server  *p2p.Server
+	store         *pebblestore.Store
+	server        *p2p.Server
+	pcStore *publicchannel.Store
 	cancel  context.CancelFunc
 }
 
@@ -79,13 +81,31 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	server := p2p.NewServer(host, logger, frameLimits(cfg), protocolTimeouts(), storeSvc, fetchSvc, ackSvc)
 	server.Register()
 
+	var pcStore *publicchannel.Store
+	if cfg.PublicChannel.Enabled {
+		dbPath := cfg.PublicChannel.DBPath
+		if dbPath == "" {
+			dbPath = filepath.Join(filepath.Clean(cfg.Store.DataDir), "public_channels.db")
+		}
+		sqlDB, err := publicchannel.Open(dbPath)
+		if err != nil {
+			store.Close()
+			host.Close()
+			return nil, fmt.Errorf("open public channel db: %w", err)
+		}
+		pcStore = publicchannel.NewStore(sqlDB)
+		pcSvc := publicchannel.NewService(pcStore, logger)
+		p2p.NewPublicChannelServer(host, logger, publicChannelFrameLimits(), protocolTimeouts(), pcSvc).Register()
+	}
+
 	return &App{
 		cfg:     cfg,
 		logger:  logger,
 		metrics: metricsObj,
 		host:    host,
-		store:   store,
-		server:  server,
+		store:    store,
+		server:   server,
+		pcStore: pcStore,
 	}, nil
 }
 
@@ -102,6 +122,11 @@ func (a *App) Close() error {
 	}
 	if a.host != nil {
 		if err := a.host.Close(); err != nil {
+			return err
+		}
+	}
+	if a.pcStore != nil {
+		if err := a.pcStore.Close(); err != nil {
 			return err
 		}
 	}
@@ -141,5 +166,13 @@ func protocolTimeouts() p2p.Timeouts {
 		Read:    15 * time.Second,
 		Write:   15 * time.Second,
 		Handler: 30 * time.Second,
+	}
+}
+
+func publicChannelFrameLimits() p2p.PublicChannelFrameLimits {
+	const maxFrame = 8 * 1024 * 1024
+	return p2p.PublicChannelFrameLimits{
+		RPCRequest:  maxFrame,
+		RPCResponse: maxFrame,
 	}
 }

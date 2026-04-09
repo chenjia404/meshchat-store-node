@@ -1,1 +1,3 @@
 data/
+.gomodcache/
+.gopath/

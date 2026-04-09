@@ -31,6 +31,11 @@ type Config struct {
 	RateLimit struct {
 		PerSenderPerMinute int `yaml:"per_sender_per_minute"`
 	} `yaml:"rate_limit"`
+	// PublicChannel 去中心化公开频道存储（SQLite public_channels.db）。
+	PublicChannel struct {
+		Enabled bool   `yaml:"enabled"`
+		DBPath  string `yaml:"db_path"`
+	} `yaml:"public_channel"`
 }
 
 func Default() Config {
@@ -46,6 +51,8 @@ func Default() Config {
 	cfg.GC.IntervalSec = 10
 	cfg.GC.BatchSize = 1000
 	cfg.RateLimit.PerSenderPerMinute = 100
+	cfg.PublicChannel.Enabled = true
+	cfg.PublicChannel.DBPath = ""
 	return cfg
 }
 

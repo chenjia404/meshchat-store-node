@@ -15,3 +15,6 @@ coverage
 
 Dockerfile.*
 README.md
+.gomodcache/
+.gopath/
+

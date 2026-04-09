@@ -20,6 +20,8 @@ const (
 	CodeAfterSeqInvalid        = "AFTER_SEQ_INVALID"
 	CodeDuplicate              = "DUPLICATE"
 	CodeInternalError          = "INTERNAL_ERROR"
+	CodePublicChannelStale     = "PUBLIC_CHANNEL_STALE"
+	CodePublicChannelNotFound  = "PUBLIC_CHANNEL_NOT_FOUND"
 )
 
 type AppError struct {
